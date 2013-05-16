@@ -21,22 +21,14 @@ class C2DM
       'Passwd'      => password,
       'source'      => source || 'MyCompany-MyAppName-1.0'
     }
-    post_body = build_post_body(auth_options)
-
-    params = {
-      :body    => post_body,
-      :headers => {
-        'Content-type'   => 'application/x-www-form-urlencoded',
-        'Content-length' => post_body.length.to_s
-      }
-    }
-
-    response = http_post(AUTH_URL, params)
+    response = post_message(AUTH_URL,auth_options, nil)
 
     # check for authentication failures
-    raise response.parsed_response if response['Error=']
-
-    @auth_token = response.body.split("\n")[2].gsub('Auth=', '')
+    if response['Error=']
+      raise response.parsed_response
+    else
+      @auth_token = response.body.split("\n")[2].gsub('Auth=', '')
+    end
 
     self
   end
@@ -60,18 +52,8 @@ class C2DM
   # }
   def send_notification(options)
     options[:collapse_key] ||= 'foo'
-    post_body = build_post_body(options)
+    response = post_message(PUSH_URL, options)
 
-    params = {
-      :body    => post_body,
-      :headers => {
-        'Authorization'  => "GoogleLogin auth=#{@auth_token}",
-        'Content-type'   => 'application/x-www-form-urlencoded',
-        'Content-length' => "#{post_body.length}"
-      }
-    }
-
-    http_post(PUSH_URL, params)
   end
 
   private
@@ -90,6 +72,21 @@ class C2DM
     end
 
     post_body.join('&')
+  end
+
+  def post_message(url, params, auth_token=@auth_token)
+    post_body = build_post_body(params)
+
+    post_params = {
+      :body    => post_body,
+      :headers => {
+        'Content-type'   => 'application/x-www-form-urlencoded',
+        'Content-length' => post_body.length.to_s
+      }
+    }
+    post_params[:headers]['Authorization'] = "GoogleLogin auth=#{auth_token}" if auth_token
+
+    http_post(url, post_params)
   end
 
   def http_post(url, params)
