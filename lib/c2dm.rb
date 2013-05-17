@@ -10,13 +10,14 @@ class C2DM
   AUTH_URL = 'https://www.google.com/accounts/ClientLogin'
   PUSH_URL = 'https://android.apis.google.com/c2dm/send'
 
-  def initialize()
+  def initialize(auth_token=nil)
     @http     = Net::HTTP::Persistent.new 'c2dm'
-    @http.debug_output = $stderr
+    #@http.debug_output = $stderr
     # google certificate for c2dm is not valid, turn off VERIFY_PEER (default)
     @http.verify_mode = OpenSSL::SSL::VERIFY_NONE
     @auth_uri = URI(AUTH_URL)
     @push_uri = URI(PUSH_URL)
+    @auth_token = auth_token
   end
 
   def authenticate!(username, password, source)
@@ -59,6 +60,14 @@ class C2DM
   #   body: response
   # }
   def send_notification(options)
+    if ! authenticated?
+      return {
+        code: 401,
+        response: 'no AUTH_TOKEN',
+        body: nil,
+        registration_id: options[:registration_id]
+      }
+    end
     options[:collapse_key] ||= 'foo'
     response = post_message(@push_uri, options)
     body = Hash[URI.decode_www_form(response.body)]
@@ -88,9 +97,11 @@ class C2DM
       end
     when 401
       result[:response]='AUTH_TOKEN' #401 Unauthorized
+      unauthenticate!
       raise InvalidAuth.new(response.body)
     when 404
       # concerned that a 404 will get confused with token not found
+      unauthenticate!
       raise InvalidAuth.new(response.body)
     when 503
       result[:response]='Retry' #503 Server Unavailable
@@ -102,6 +113,14 @@ class C2DM
 
   def close
     @http.shutdown
+  end
+
+  def authenticated?
+    !! @auth_token
+  end
+
+  def unauthenticate!
+    @auth_token=nil
   end
 
   private
