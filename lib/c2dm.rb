@@ -1,11 +1,9 @@
-require 'httparty'
+require 'net/http/persistent'
 require 'cgi'
 require 'uri'
 
 class C2DM
   class InvalidAuth < StandardError ; end
-  include HTTParty
-  default_timeout 30
 
   attr_accessor :timeout, :auth_token
 
@@ -13,6 +11,12 @@ class C2DM
   PUSH_URL = 'https://android.apis.google.com/c2dm/send'
 
   def initialize()
+    @http     = Net::HTTP::Persistent.new 'c2dm'
+    @http.debug_output = $stderr
+    # google certificate for c2dm is not valid, turn off VERIFY_PEER (default)
+    @http.verify_mode = OpenSSL::SSL::VERIFY_NONE
+    @auth_uri = URI(AUTH_URL)
+    @push_uri = URI(PUSH_URL)
   end
 
   def authenticate!(username, password, source)
@@ -23,7 +27,7 @@ class C2DM
       'Passwd'      => password,
       'source'      => source
     }
-    response = post_message(AUTH_URL,auth_options, nil)
+    response = post_message(@auth_uri, auth_options, nil)
     body = Hash[response.body.split("\n").map {|r| r.split("=")}]
 
     # check for authentication failures
@@ -56,8 +60,9 @@ class C2DM
   # }
   def send_notification(options)
     options[:collapse_key] ||= 'foo'
-    response = post_message(PUSH_URL, options)
+    response = post_message(@push_uri, options)
     body = Hash[URI.decode_www_form(response.body)]
+#    body = Hash[response.body.split(('&').map{|l| l.split('=')})]
 
     result = {
       code:            response.code,
@@ -66,11 +71,7 @@ class C2DM
       registration_id: options[:registration_id]
     }
 
-
-#    body = Hash[response.body.split(('&').map{|l| l.split('=')})]
-    headers = response.headers
-
-    case response.code
+    case response.code.to_i
     when 200
       case body['Error']
       when 'QuotaExceeded', 'DeviceQuotaExceeded' #406 Not Acceptable
@@ -93,46 +94,38 @@ class C2DM
       raise InvalidAuth.new(response.body)
     when 503
       result[:response]='Retry' #503 Server Unavailable
-      result[:retry_after]=response.headers['Retry-After']
+      result[:retry_after]=response.get_field('Retry-After')
     end
 
     result
   end
 
+  def close
+    @http.shutdown
+  end
+
   private
 
-  def build_post_body(options={})
-    post_body = []
-
-    # data attributes need a key in the form of "data.key"...
-    data_attributes = options.delete(:data)
-    data_attributes.each_pair do |k,v|
-      post_body << "data.#{k}=#{CGI::escape(v.to_s)}"
-    end if data_attributes
-
-    options.each_pair do |k,v|
-      post_body << "#{k}=#{CGI::escape(v.to_s)}"
+  def flatten_post_body(options={})
+    options = options.dup
+    if data_attributes = options.delete(:data)
+      data_attributes.each_pair do |k,v|
+        options["data.#{k}"] = v
+      end
     end
-
-    post_body.join('&')
+    options
   end
 
   def post_message(url, params, auth_token=@auth_token)
-    post_body = build_post_body(params)
-
-    post_params = {
-      body:    post_body,
-      headers: {
-        'Content-type'   => 'application/x-www-form-urlencoded',
-        'Content-length' => post_body.length.to_s
-      }
-    }
-    post_params[:headers]['Authorization'] = "GoogleLogin auth=#{auth_token}" if auth_token
-
-    http_post(url, post_params)
+    http_post(url, flatten_post_body(params), auth_token)
   end
 
-  def http_post(url, params)
-    response = self.class.post(url, params)
+  def http_post(url, body, auth_token)
+    post = Net::HTTP::Post.new url.path
+
+    post.form_data = body
+    post.add_field('Authorization', "GoogleLogin auth=#{auth_token}") if auth_token
+
+    @http.request url, post
   end
 end
