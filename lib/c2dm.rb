@@ -10,17 +10,18 @@ class C2DM
   AUTH_URL = 'https://www.google.com/accounts/ClientLogin'
   PUSH_URL = 'https://android.apis.google.com/c2dm/send'
 
-  def initialize(auth_token=nil)
+  def initialize(options={})
     @http     = Net::HTTP::Persistent.new 'c2dm'
     #@http.debug_output = $stderr
     # google certificate for c2dm is not valid, turn off VERIFY_PEER (default)
     @http.verify_mode = OpenSSL::SSL::VERIFY_NONE
-    @auth_uri = URI(AUTH_URL)
-    @push_uri = URI(PUSH_URL)
-    @auth_token = auth_token
+    @auth_uri = URI(options[:auth_url] || AUTH_URL)
+    @push_uri = URI(options[:push_url] || PUSH_URL)
+    @auth_token = options[:auth_token]
   end
 
   def authenticate!(username, password, source)
+    return if @auth_token
     auth_options = {
       'accountType' => 'HOSTED_OR_GOOGLE',
       'service'     => 'ac2dm',
