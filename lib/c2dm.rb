@@ -5,7 +5,7 @@ require 'uri'
 class C2DM
   class InvalidAuth < StandardError ; end
 
-  attr_accessor :timeout, :auth_token
+  attr_accessor :timeout, :auth_token, :retries
 
   AUTH_URL = 'https://www.google.com/accounts/ClientLogin'
   PUSH_URL = 'https://android.apis.google.com/c2dm/send'
@@ -18,6 +18,7 @@ class C2DM
     @auth_uri = URI(options[:auth_url] || AUTH_URL)
     @push_uri = URI(options[:push_url] || PUSH_URL)
     @auth_token = options[:auth_token]
+    @retries  = options[:retries] || 3
   end
 
   def authenticate!(username, password, source)
@@ -62,6 +63,12 @@ class C2DM
   #   code: [200,400,401,404,406,503]
   # }
   def send_notification(options)
+    with_retry do |p|
+      send_message(options)
+    end
+  end
+
+  def send_message(options)
     if ! authenticated?
       return {
         code: 401,
@@ -123,6 +130,23 @@ class C2DM
 
   def unauthenticate!
     @auth_token=nil
+  end
+
+  def with_retry(&block)
+    attempts = 1
+    begin
+      block.yield self
+    rescue => e
+      if e.class == OpenSSL::SSL::SSLError && e.message =~ /certificate expired/i
+        e.extend(CertificateExpiredError)
+        raise
+      end
+      block.call(nil, e) if block.arity == 2
+      close
+      raise unless attempts < retries
+      attempts += 1
+      retry
+    end
   end
 
   private
