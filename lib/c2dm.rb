@@ -43,7 +43,7 @@ class C2DM
   end
 
   def send_notifications(notifications = [])
-    notifications.collect { |notification| c2dm.send_notification(notification) }
+    notifications.collect { |notification| send_notification(notification) }
   end
 
   # input:
@@ -58,7 +58,8 @@ class C2DM
   # results:
   # {
   #   registration_id: "...",
-  #   body: response
+  #   body: response,
+  #   code: [200,400,401,404,406,503]
   # }
   def send_notification(options)
     if ! authenticated?
